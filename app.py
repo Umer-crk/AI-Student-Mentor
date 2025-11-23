@@ -116,13 +116,17 @@ tabs = st.tabs(["Upload PDF", "Ask a Question"])
 # Tab 1: Upload PDF
 # -------------------------------
 with tabs[0]:
-    uploaded = st.file_uploader("Upload PDF (≤2MB)", type=["pdf"])
+    uploaded = st.file_uploader(
+        label="📄 Upload your PDF (Limit 2MB per file. PDF)",  # Fixed label
+        type=["pdf"]
+    )
+    
     if uploaded:
         max_size = 2 * 1024 * 1024  # 2MB in bytes
         if uploaded.size > max_size:
-            st.warning("PDF size exceeds 2MB. Please upload a smaller file for free usage.")
+            st.error(f"❌ PDF size exceeds 2MB. Your file size: {uploaded.size/1024/1024:.2f} MB")
         else:
-            st.info("Processing PDF...")
+            st.info("⏳ Processing PDF...")
             full_text = ocr_extract(uploaded)
             if full_text.strip():
                 mcqs = call_groq_chunks(full_text, prompt_mcqs)
