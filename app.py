@@ -118,7 +118,8 @@ tabs = st.tabs(["Upload PDF", "Ask a Question"])
 with tabs[0]:
     uploaded = st.file_uploader("Upload PDF (≤2MB)", type=["pdf"])
     if uploaded:
-        if uploaded.size > 2*1024*1024:
+        max_size = 2 * 1024 * 1024  # 2MB in bytes
+        if uploaded.size > max_size:
             st.warning("PDF size exceeds 2MB. Please upload a smaller file for free usage.")
         else:
             st.info("Processing PDF...")
