@@ -6,18 +6,27 @@ import requests
 from io import BytesIO
 
 # -------------------------------
-# Groq API settings (use Streamlit secrets)
+# Groq API settings (from Streamlit secrets)
 # -------------------------------
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", "")
-GROQ_MODEL = "llama-3.3-70b-versatile"
+try:
+    GROQ_API_KEY = st.secrets["groq"]["API_KEY"]
+    GROQ_MODEL = st.secrets["groq"]["MODEL"]
+except KeyError:
+    st.error("❌ Groq API key or model not found in secrets.toml.")
+    st.stop()
 
 def call_groq(prompt, max_tokens=700):
+    if not GROQ_API_KEY:
+        return "❌ API Key not configured."
+    
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {"model": GROQ_MODEL, "messages":[{"role":"user","content":prompt}], "max_tokens": max_tokens}
     try:
         r = requests.post("https://api.groq.com/openai/v1/chat/completions", json=payload, headers=headers, timeout=60)
         if r.status_code == 200:
             return r.json()["choices"][0]["message"]["content"]
+        elif r.status_code == 401:
+            return "❌ Invalid API Key. Please check your Groq API key in secrets.toml."
         else:
             return f"API Error {r.status_code}: {r.text}"
     except Exception as e:
@@ -117,7 +126,7 @@ tabs = st.tabs(["Upload PDF", "Ask a Question"])
 # -------------------------------
 with tabs[0]:
     uploaded = st.file_uploader(
-        label="📄 Upload your PDF (Limit 2MB per file. PDF)",  # Fixed label
+        label="📄 Upload your PDF (Limit 2MB per file. PDF)",
         type=["pdf"]
     )
     
