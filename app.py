@@ -8,29 +8,23 @@ import numpy as np
 from transformers import pipeline, AutoTokenizer, AutoModelForSeq2SeqLM
 from sentence_transformers import SentenceTransformer
 
-# pyKT imports
-from pykt.models import DKT
-from pykt.preprocessing import ResponseSequence, KCMapping
+# -----------------------------
+# Config & Secrets
+# -----------------------------
+st.set_page_config(page_title="AI Study Mentor (Stable)", page_icon="📘", layout="wide")
 
-# ------------------------------
-# CONFIG
-# ------------------------------
-st.set_page_config(page_title="AI Study Mentor (Secure Groq)", page_icon="📘", layout="wide")
-
-# ------------------------------
-# Load Groq API key from Streamlit Secrets
-# ------------------------------
+# Load Groq API key from secrets
 try:
     GROQ_API_KEY = st.secrets["groq"]["API_KEY"]
     GROQ_MODEL = st.secrets["groq"]["MODEL"]
-except KeyError:
+except Exception:
     GROQ_API_KEY = None
-    GROQ_MODEL = "llama-3.3-70b-versatile"
-    st.warning("Groq API key not found in Streamlit Secrets. Falling back to local model.")
+    GROQ_MODEL = "llama‑3.3‑70b‑versatile"
+    st.warning("Groq API key not found in Streamlit Secrets — using local model fallback.")
 
-# ------------------------------
-# Load Models
-# ------------------------------
+# -----------------------------
+# Load models (cached)
+# -----------------------------
 @st.cache_resource
 def load_models():
     gen_name = "google/flan-t5-base"
@@ -38,29 +32,21 @@ def load_models():
     gen_model = AutoModelForSeq2SeqLM.from_pretrained(gen_name)
     gen_pipe = pipeline("text2text-generation", model=gen_model, tokenizer=tokenizer)
 
-    sentiment = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-    embed = SentenceTransformer("all-MiniLM-L6-v2")
+    sentiment_pipe = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+    embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-    return gen_pipe, sentiment, embed
+    return gen_pipe, sentiment_pipe, embed_model
 
 gen_pipe, sentiment_pipe, embed_model = load_models()
 
-# ------------------------------
-# Initialize Knowledge Tracing
-# ------------------------------
-@st.cache_resource
-def init_kt_model(num_kcs):
-    model = DKT(n_items=num_kcs, hidden_size=32, n_layers=1)
-    return model
-
-# ------------------------------
-# Groq API call
-# ------------------------------
+# -----------------------------
+# Utility functions
+# -----------------------------
 def call_groq(prompt, max_tokens=700):
     if not GROQ_API_KEY:
         return None
     try:
-        resp = requests.post(
+        response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
             headers={
                 "Authorization": f"Bearer {GROQ_API_KEY}",
@@ -68,44 +54,35 @@ def call_groq(prompt, max_tokens=700):
             },
             json={
                 "model": GROQ_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [{"role":"user","content":prompt}],
                 "max_tokens": max_tokens
             },
             timeout=60
         )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         st.warning(f"Groq API call failed: {e}")
         return None
 
-# ------------------------------
-# Text Generation
-# ------------------------------
 def generate_text(prompt):
-    api_out = call_groq(prompt)
-    if api_out:
-        return api_out
-    out = gen_pipe(prompt, max_length=512, do_sample=False)
-    return out[0]["generated_text"]
+    out = call_groq(prompt)
+    if out:
+        return out
+    result = gen_pipe(prompt, max_length=512, do_sample=False)
+    return result[0]["generated_text"]
 
-# ------------------------------
-# OCR Extraction
-# ------------------------------
 def ocr_extract(file, dpi=150, max_pages=50):
     name = file.name.lower()
     if name.endswith(".pdf"):
         data = file.read()
-        images = convert_from_bytes(data, dpi=dpi)[:max_pages]
-        text = "\n".join([pytesseract.image_to_string(img) for img in images])
+        pages = convert_from_bytes(data, dpi=dpi)[:max_pages]
+        text = "\n".join([pytesseract.image_to_string(page) for page in pages])
         return text
     else:
         img = Image.open(file)
         return pytesseract.image_to_string(img)
 
-# ------------------------------
-# Chunk Text
-# ------------------------------
 def chunk_text(text, max_chars=2000):
     words = text.split()
     chunks = []
@@ -122,27 +99,39 @@ def chunk_text(text, max_chars=2000):
         chunks.append(" ".join(cur))
     return chunks
 
-# ------------------------------
+# -----------------------------
 # UI
-# ------------------------------
-st.title("📘 AI Study Mentor — Secure with Streamlit Secrets")
+# -----------------------------
+st.title("📘 AI Study Mentor — Free/Stable Edition")
+st.markdown("""
+This app uses:
+- Real‑time PDF/Image upload → Notes, MCQs, Flowcharts  
+- Retrieval‑augmented generation (RAG) via embeddings  
+- Sentiment‑aware tutoring style  
+- Local models + optional Groq API  
+""")
 
-uploaded = st.file_uploader("Upload PDF / Image for study", type=["pdf","jpg","png","jpeg"])
+# Remind about secrets
+if GROQ_API_KEY is None:
+    st.info("To use the remote generation (Groq), please set the API key in `.streamlit/secrets.toml` under [groq] section.")
+
+uploaded = st.file_uploader("Upload PDF or Image (recommended ≤ 2MB for free use)", type=["pdf","png","jpg","jpeg"])
+
 max_pages = st.sidebar.slider("Max pages to OCR", 5, 200, 50)
 
 if uploaded:
-    with st.spinner("Extracting text..."):
+    with st.spinner("Extracting text from file..."):
         full_text = ocr_extract(uploaded, max_pages=max_pages)
     if not full_text.strip():
-        st.error("No text extracted.")
+        st.error("No extractable text found.")
     else:
         chunks = chunk_text(full_text)
-        st.success(f"Text split into {len(chunks)} chunks.")
+        st.success(f"Split into {len(chunks)} chunks.")
 
-        # Generate Notes, MCQs, Flowcharts
-        notes = [generate_text(f"Summarize into study notes:\n\n{ch}") for ch in chunks]
-        mcqs = [generate_text(f"Generate 5 MCQs with options + answer:\n\n{ch}") for ch in chunks]
-        flows = [generate_text(f"Convert into Mermaid flowchart:\n\n{ch}") for ch in chunks]
+        # Generate study materials
+        notes = [ generate_text(f"Summarize into study notes:\n\n{ch}") for ch in chunks ]
+        mcqs  = [ generate_text(f"Generate 5 MCQs (4 options + answer) from:\n\n{ch}") for ch in chunks ]
+        flows = [ generate_text(f"Convert into Mermaid flowchart:\n\n{ch}") for ch in chunks ]
 
         st.header("📝 Notes")
         for i, n in enumerate(notes):
@@ -159,59 +148,56 @@ if uploaded:
             st.subheader(f"Chunk {i+1}")
             st.markdown("```mermaid\n" + f + "\n```")
 
-        # Embeddings
+        # Build embeddings for retrieval
         embs = embed_model.encode(chunks, convert_to_numpy=True)
         st.session_state["chunks"] = chunks
         st.session_state["embeddings"] = embs
 
-        # Initialize KT model
-        if "kt_model" not in st.session_state:
-            st.session_state["kt_model"] = init_kt_model(len(chunks))
-            st.session_state["seq"] = ResponseSequence()
+        # Simple mastery tracking using counts
+        if "mastery_counts" not in st.session_state:
+            st.session_state["mastery_counts"] = { i: {"correct":0, "total":0} for i in range(len(chunks)) }
 
-        # Practice MCQs
         st.header("🧪 Practice MCQs")
-        chunk_index = st.number_input("Select chunk", 1, len(chunks), 1) - 1
-        if mcqs[chunk_index]:
-            st.write(mcqs[chunk_index])
-            user_ans = st.text_input("Type your answer (e.g. A, B, C, D)")
-            if st.button("Submit your answer"):
-                correct = st.radio("Was your answer correct?", ("Yes", "No"))
-                obs = 1 if correct == "Yes" else 0
-                kc_map = KCMapping({i: i for i in range(len(chunks))})
-                st.session_state["seq"].add_response(kc_map, chunk_index, obs)
-                st.session_state["kt_model"].fit(st.session_state["seq"])
-                mastery = st.session_state["kt_model"].predict(st.session_state["seq"])
-                st.session_state["mastery"] = mastery[0].tolist()
-                st.success(f"Updated mastery: {st.session_state['mastery']}")
+        idx = st.number_input("Select chunk to practice (1‑based)", 1, len(chunks), 1) - 1
+        if mcqs[idx]:
+            st.write(mcqs[idx])
+            user_ans = st.text_input("Enter your answer option (e.g. A, B, C, D):")
+            if st.button("Submit Answer for chunk"):
+                correct = st.radio("Did you answer correctly?", ("Yes","No"))
+                st.session_state["mastery_counts"][idx]["total"] += 1
+                if correct == "Yes":
+                    st.session_state["mastery_counts"][idx]["correct"] += 1
+                correct_rate = (st.session_state["mastery_counts"][idx]["correct"] /
+                                st.session_state["mastery_counts"][idx]["total"])
+                st.success(f"Chunk {idx+1} mastery ≈ {correct_rate:.2f}")
 
-        # Recommend weak topics
-        if "mastery" in st.session_state:
-            st.header("🔍 Topics to Review")
-            probs = st.session_state["mastery"]
-            weakest = sorted(range(len(probs)), key=lambda i: probs[i])[:3]
-            for w in weakest:
-                st.write(f"Chunk {w+1}: mastery ≈ {probs[w]:.2f}")
+        st.header("🔍 Topic Review Recommendation")
+        mastery_rates = { i: (st.session_state["mastery_counts"][i]["correct"] /
+                              st.session_state["mastery_counts"][i]["total"]
+                              if st.session_state["mastery_counts"][i]["total"]>0 else 0.0)
+                          for i in range(len(chunks)) }
+        weak_order = sorted(mastery_rates, key=lambda i: mastery_rates[i])[:3]
+        for w in weak_order:
+            st.write(f"Chunk {w+1}: mastery approx {mastery_rates[w]:.2f}")
 
-        # Q&A with RAG + sentiment
-        st.header("❓ Ask Mentor a Question")
+        st.header("❓ Ask a Question")
         question = st.text_area("Your question:", height=150)
         if st.button("Get Answer"):
             if "embeddings" in st.session_state:
                 q_emb = embed_model.encode([question], convert_to_numpy=True)[0]
                 sims = (st.session_state["embeddings"] @ q_emb) / (
-                    np.linalg.norm(st.session_state["embeddings"], axis=1) * np.linalg.norm(q_emb)
+                        np.linalg.norm(st.session_state["embeddings"], axis=1) * np.linalg.norm(q_emb)
                 )
-                top_idx = sims.argsort()[-3:][::-1]
-                context = "\n\n".join([st.session_state["chunks"][i] for i in top_idx])
+                top3 = sims.argsort()[-3:][::-1]
+                context = "\n\n".join([st.session_state["chunks"][i] for i in top3])
 
-                sentiment = sentiment_pipe(question[:512])[0]["label"]
-                style = "supportive, step-by-step" if sentiment == "NEGATIVE" else "clear and detailed"
+                sentiment_lbl = sentiment_pipe(question[:512])[0]["label"]
+                style = "supportive, step‑by‑step" if sentiment_lbl=="NEGATIVE" else "clear and detailed"
 
-                prompt = f"You are a professional tutor. Style: {style}. Context: {context}\n\nQuestion: {question}"
+                prompt = f"You are a professional tutor. Style: {style}. Context:\n{context}\n\nQuestion:\n{question}"
                 answer = generate_text(prompt)
 
-                prompt_flow = f"Explain the answer as a Mermaid flowchart. Context: {context}\n\nQuestion: {question}"
+                prompt_flow = f"Explain the answer as a Mermaid flowchart. Context:\n{context}\n\nQuestion:\n{question}"
                 flowchart = generate_text(prompt_flow)
 
                 st.subheader("🧠 Answer")
@@ -219,4 +205,4 @@ if uploaded:
                 st.subheader("📊 Flowchart Explanation")
                 st.markdown("```mermaid\n" + flowchart + "\n```")
             else:
-                st.error("Upload material first to initialize knowledge base.")
+                st.error("Knowledge base not available — upload material first.")
