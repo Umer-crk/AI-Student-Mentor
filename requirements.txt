@@ -5,5 +5,5 @@ Pillow>=9.5.0
 requests>=2.31
 transformers>=4.40
 sentence-transformers>=2.2.2
-torch>=1.13.0
-pyBKT>=1.4.1
+torch>=2.0.0
+pykt-toolkit>=0.2.0
